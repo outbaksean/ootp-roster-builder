@@ -7,8 +7,9 @@ import CardUploader from "./components/CardUploader.vue";
 import PitchingView from "./components/PitchingView.vue";
 import LineupsView from "./components/LineupsView.vue";
 import RosterView from "./components/RosterView.vue";
+import DepthChartView from "./components/DepthChartView.vue";
 
-type Tab = "pitching" | "lineups" | "roster";
+type Tab = "pitching" | "lineups" | "roster" | "depth";
 
 const rosterStore = useRosterStore();
 const settingsStore = useSettingsStore();
@@ -63,6 +64,16 @@ function toggleSidebar() {
           "
         >
           LINEUPS
+        </button>
+        <button
+          class="nav-tab"
+          :class="{ 'nav-tab--active': activeTab === 'depth' }"
+          @click="
+            activeTab = 'depth';
+            rosterStore.setActiveSlot(null);
+          "
+        >
+          GRAPHICAL DEPTH CHART
         </button>
       </div>
     </nav>
@@ -134,7 +145,8 @@ function toggleSidebar() {
       <main class="main-panel">
         <RosterView v-if="activeTab === 'roster'" />
         <PitchingView v-else-if="activeTab === 'pitching'" />
-        <LineupsView v-else />
+        <LineupsView v-else-if="activeTab === 'lineups'" />
+        <DepthChartView v-else />
       </main>
     </div>
   </div>
