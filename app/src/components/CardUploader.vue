@@ -13,13 +13,11 @@ const statusText = computed(() =>
 
 const loadedAtText = computed(() => {
   if (!cardStore.loadedAt) return null;
-  return new Date(cardStore.loadedAt).toLocaleString(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
+  const date = new Date(cardStore.loadedAt);
+  if (cardStore.loadedFrom === "bundled") {
+    return `bundled ${date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric" })}`;
+  }
+  return `uploaded ${date.toLocaleString(undefined, { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })}`;
 });
 
 function triggerUpload() {
@@ -62,6 +60,15 @@ async function onFileChange(e: Event) {
         </button>
       </div>
       <div v-if="loadedAtText" class="loaded-at">{{ loadedAtText }}</div>
+      <div v-if="cardStore.loadedFrom === 'uploaded'" class="revert-row">
+        <button
+          class="revert-btn"
+          :disabled="cardStore.isLoading"
+          @click="cardStore.revertToBundled()"
+        >
+          Use bundled
+        </button>
+      </div>
     </div>
     <input
       ref="fileInput"
@@ -169,5 +176,29 @@ async function onFileChange(e: Event) {
   font-size: 0.66rem;
   color: #475569;
   padding-left: 0.9rem;
+}
+
+.revert-row {
+  padding-left: 0.9rem;
+}
+
+.revert-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  color: #475569;
+  font-size: 0.66rem;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.revert-btn:hover:not(:disabled) {
+  color: #64748b;
+}
+
+.revert-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 </style>

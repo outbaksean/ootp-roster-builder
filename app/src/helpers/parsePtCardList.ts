@@ -20,7 +20,11 @@ export type PtCardRow = {
   powerVR: number;
   eyeVR: number;
   avoidKVR: number;
+  stuff: number;
+  movement: number;
+  control: number;
   stamina: number;
+  posRatingP: number;
   posRatingC: number;
   posRating1B: number;
   posRating2B: number;
@@ -87,7 +91,11 @@ export function parsePtCardList(csvText: string): PtCardRow[] {
       powerVR: n(cols[37]),
       eyeVR: n(cols[38]),
       avoidKVR: n(cols[39]),
+      stuff: n(cols[50]),
+      movement: n(cols[51]),
+      control: n(cols[52]),
       stamina: n(cols[77]),
+      posRatingP: n(cols[93]),
       posRatingC: n(cols[94]),
       posRating1B: n(cols[95]),
       posRating2B: n(cols[96]),
