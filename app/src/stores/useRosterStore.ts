@@ -6,6 +6,8 @@ import type {
   DepthSlot,
   HitterPosition,
   BullpenRole,
+  SecondaryRole,
+  RpUsage,
   UtilityStarts,
 } from "@/models/types";
 import { ERAS, ROSTER_TYPES, ALL_HITTER_POSITIONS } from "@/models/types";
@@ -67,6 +69,10 @@ function defaultRoster(): Roster {
 
 function migrateRoster(r: Roster): Roster {
   if (r.spCount == null) r.spCount = 5;
+  for (const p of r.pitchers) {
+    if (!p.secondaryRole) p.secondaryRole = "None" as const;
+    if (!p.usage) p.usage = "NormalUsage" as const;
+  }
   for (const side of ["lineupVR", "lineupVL"] as const) {
     const lu = r[side] as unknown as Record<string, unknown>;
     if (!lu.battingOrder) {
@@ -306,6 +312,8 @@ export const useRosterStore = defineStore("roster", () => {
       role,
       order,
       bullpenRole: existing?.bullpenRole ?? "MiddleRelief",
+      secondaryRole: existing?.secondaryRole ?? "None",
+      usage: existing?.usage ?? "NormalUsage",
     });
     roster.value = { ...roster.value, pitchers };
     persist();
@@ -344,6 +352,22 @@ export const useRosterStore = defineStore("roster", () => {
   function setBullpenRole(cardId: number, bullpenRole: BullpenRole) {
     const pitchers = roster.value.pitchers.map((p) =>
       p.cardId === cardId ? { ...p, bullpenRole } : p,
+    );
+    roster.value = { ...roster.value, pitchers };
+    persist();
+  }
+
+  function setSecondaryRole(cardId: number, secondaryRole: SecondaryRole) {
+    const pitchers = roster.value.pitchers.map((p) =>
+      p.cardId === cardId ? { ...p, secondaryRole } : p,
+    );
+    roster.value = { ...roster.value, pitchers };
+    persist();
+  }
+
+  function setRpUsage(cardId: number, usage: RpUsage) {
+    const pitchers = roster.value.pitchers.map((p) =>
+      p.cardId === cardId ? { ...p, usage } : p,
     );
     roster.value = { ...roster.value, pitchers };
     persist();
@@ -495,6 +519,19 @@ export const useRosterStore = defineStore("roster", () => {
     persist();
   }
 
+  function clearRoster() {
+    roster.value = {
+      ...roster.value,
+      rosterPitcherIds: Array(12).fill(null),
+      rosterHitterIds: Array(14).fill(null),
+      pitchers: [],
+      lineupVR: emptyLineupConfig(),
+      lineupVL: emptyLineupConfig(),
+    };
+    activeSlot.value = null;
+    persist();
+  }
+
   return {
     roster,
     activeSlot,
@@ -517,6 +554,8 @@ export const useRosterStore = defineStore("roster", () => {
     clearPitcherSlot,
     movePitcher,
     setBullpenRole,
+    setSecondaryRole,
+    setRpUsage,
     getLineup,
     assignDepthSlot,
     clearDepthSlot,
@@ -525,5 +564,6 @@ export const useRosterStore = defineStore("roster", () => {
     assignBenchSlot,
     clearBenchSlot,
     resetRoster,
+    clearRoster,
   };
 });

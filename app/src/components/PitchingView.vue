@@ -2,8 +2,13 @@
 import { ref, computed } from "vue";
 import { useCardStore } from "@/stores/useCardStore";
 import { useRosterStore } from "@/stores/useRosterStore";
-import { BULLPEN_ROLE_LABELS, pitcherRoleLabel } from "@/models/types";
-import type { BullpenRole } from "@/models/types";
+import {
+  BULLPEN_ROLE_LABELS,
+  SECONDARY_ROLE_LABELS,
+  RP_USAGE_LABELS,
+  pitcherRoleLabel,
+} from "@/models/types";
+import type { BullpenRole, SecondaryRole, RpUsage } from "@/models/types";
 
 const cardStore = useCardStore();
 const rosterStore = useRosterStore();
@@ -80,6 +85,8 @@ const bullpenSlots = computed(() =>
       order,
       card: p ? cardStore.pitcherById.get(p.cardId) : undefined,
       bullpenRole: p?.bullpenRole ?? ("MiddleRelief" as BullpenRole),
+      secondaryRole: p?.secondaryRole ?? ("None" as SecondaryRole),
+      usage: p?.usage ?? ("NormalUsage" as RpUsage),
       active:
         rosterStore.activeSlot?.kind === "rp" &&
         rosterStore.activeSlot.order === order,
@@ -147,6 +154,13 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
         <span class="roster-panel-count">{{
           rosterStore.rosterPitcherIdSet.size
         }}</span>
+      </div>
+      <div class="roster-col-headers">
+        <span class="rr-name rr-col-label">Name</span>
+        <span class="rr-pos rr-col-label">Eligible</span>
+        <span class="rr-ovr rr-col-label">OVR</span>
+        <span class="rr-stamina rr-col-label">STA</span>
+        <span class="rr-remove-spacer" />
       </div>
       <div class="roster-list">
         <div
@@ -274,7 +288,7 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
           <div
             v-for="slot in bullpenSlots"
             :key="slot.order"
-            class="pitcher-slot"
+            class="pitcher-slot pitcher-slot--rp"
             :class="{
               'slot-active': slot.active,
               'slot-filled': !!slot.card,
@@ -288,58 +302,106 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
             @dragleave="onSlotDragLeave($event, `rp-${slot.order}`)"
             @drop="onSlotDrop($event, 'RP', slot.order)"
           >
-            <span class="slot-num">{{ slot.order }}</span>
             <template v-if="slot.card">
-              <span class="slot-hand" :class="`hand-${slot.card.throws}`">
-                {{ slot.card.throws ?? "--" }}
-              </span>
-              <span class="slot-name">{{
-                slot.card.cardTitle || slot.card.name
-              }}</span>
-              <span class="slot-stat">{{ slot.card.overall }}</span>
-              <select
-                class="role-select"
-                :value="slot.bullpenRole"
-                @click.stop
-                @change="
-                  rosterStore.setBullpenRole(
-                    slot.card!.cardId,
-                    ($event.target as HTMLSelectElement).value as BullpenRole,
-                  )
-                "
-              >
-                <option
-                  v-for="(label, key) in BULLPEN_ROLE_LABELS"
-                  :key="key"
-                  :value="key"
-                >
-                  {{ label }}
-                </option>
-              </select>
-              <div class="slot-actions">
-                <button
-                  class="act-btn"
-                  @click.stop="rosterStore.movePitcher('RP', slot.order, 'up')"
-                >
-                  up
-                </button>
-                <button
-                  class="act-btn"
-                  @click.stop="
-                    rosterStore.movePitcher('RP', slot.order, 'down')
+              <div class="slot-main-row">
+                <span class="slot-num">{{ slot.order }}</span>
+                <span class="slot-hand" :class="`hand-${slot.card.throws}`">
+                  {{ slot.card.throws ?? "--" }}
+                </span>
+                <span class="slot-name">{{
+                  slot.card.cardTitle || slot.card.name
+                }}</span>
+                <span class="slot-stat">{{ slot.card.overall }}</span>
+                <div class="slot-actions">
+                  <button
+                    class="act-btn"
+                    @click.stop="
+                      rosterStore.movePitcher('RP', slot.order, 'up')
+                    "
+                  >
+                    up
+                  </button>
+                  <button
+                    class="act-btn"
+                    @click.stop="
+                      rosterStore.movePitcher('RP', slot.order, 'down')
+                    "
+                  >
+                    dn
+                  </button>
+                  <button
+                    class="act-btn act-clear"
+                    @click.stop="rosterStore.clearPitcherSlot('RP', slot.order)"
+                  >
+                    x
+                  </button>
+                </div>
+              </div>
+              <div class="slot-role-row">
+                <select
+                  class="role-select"
+                  :value="slot.bullpenRole"
+                  @click.stop
+                  @change="
+                    rosterStore.setBullpenRole(
+                      slot.card!.cardId,
+                      ($event.target as HTMLSelectElement).value as BullpenRole,
+                    )
                   "
                 >
-                  dn
-                </button>
-                <button
-                  class="act-btn act-clear"
-                  @click.stop="rosterStore.clearPitcherSlot('RP', slot.order)"
+                  <option
+                    v-for="(label, key) in BULLPEN_ROLE_LABELS"
+                    :key="key"
+                    :value="key"
+                  >
+                    {{ label }}
+                  </option>
+                </select>
+                <select
+                  class="role-select"
+                  :value="slot.secondaryRole"
+                  @click.stop
+                  @change="
+                    rosterStore.setSecondaryRole(
+                      slot.card!.cardId,
+                      ($event.target as HTMLSelectElement)
+                        .value as SecondaryRole,
+                    )
+                  "
                 >
-                  x
-                </button>
+                  <option
+                    v-for="(label, key) in SECONDARY_ROLE_LABELS"
+                    :key="key"
+                    :value="key"
+                  >
+                    {{ label }}
+                  </option>
+                </select>
+                <select
+                  class="role-select"
+                  :value="slot.usage"
+                  @click.stop
+                  @change="
+                    rosterStore.setRpUsage(
+                      slot.card!.cardId,
+                      ($event.target as HTMLSelectElement).value as RpUsage,
+                    )
+                  "
+                >
+                  <option
+                    v-for="(label, key) in RP_USAGE_LABELS"
+                    :key="key"
+                    :value="key"
+                  >
+                    {{ label }}
+                  </option>
+                </select>
               </div>
             </template>
-            <span v-else class="slot-empty">Click or drag to assign</span>
+            <template v-else>
+              <span class="slot-num">{{ slot.order }}</span>
+              <span class="slot-empty">Click or drag to assign</span>
+            </template>
           </div>
         </div>
       </div>
@@ -384,6 +446,23 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
 
 .roster-panel-count {
   font-size: 0.65rem;
+  color: #475569;
+}
+
+.roster-col-headers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.rr-col-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
   color: #475569;
 }
 
@@ -463,6 +542,11 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
   white-space: nowrap;
 }
 
+.rr-remove-spacer {
+  flex-shrink: 0;
+  width: 18px;
+}
+
 .rr-remove {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -489,7 +573,7 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
 
 /* ── Config panel ── */
 .config-panel {
-  height: 420px;
+  height: 500px;
   flex-shrink: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
@@ -682,6 +766,25 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
   color: #f87171;
 }
 
+.pitcher-slot--rp.slot-filled {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+}
+
+.slot-main-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.slot-role-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 20px;
+}
+
 .role-select {
   background: rgba(255, 255, 255, 0.05);
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -689,7 +792,6 @@ function onSlotDrop(event: DragEvent, role: "SP" | "RP", order: number) {
   color: #94a3b8;
   font-size: 0.65rem;
   padding: 1px 4px;
-  width: 110px;
   flex-shrink: 0;
 }
 

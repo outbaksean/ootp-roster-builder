@@ -325,11 +325,15 @@ function onBenchDrop(
             >— filtering for {{ positionFilter }}</span
           >
         </span>
-        <span class="roster-panel-count"
-          >{{ rosterStore.rosterHitterIdSet.size }}/{{
-            rosterStore.era.totalHitters
-          }}</span
-        >
+        <span class="roster-panel-count">{{
+          rosterStore.rosterHitterIdSet.size
+        }}</span>
+      </div>
+      <div class="roster-col-headers">
+        <span class="rr-name rr-col-label">Name</span>
+        <span class="rr-pos rr-col-label">Eligible</span>
+        <span class="rr-ovr rr-col-label">OVR</span>
+        <span class="rr-remove-spacer" />
       </div>
       <div class="roster-list">
         <div
@@ -845,6 +849,23 @@ function onBenchDrop(
   color: #475569;
 }
 
+.roster-col-headers {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.rr-col-label {
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
 .roster-list {
   flex: 1;
   overflow-y: auto;
@@ -911,6 +932,11 @@ function onBenchDrop(
   padding: 1px 5px;
   flex-shrink: 0;
   white-space: nowrap;
+}
+
+.rr-remove-spacer {
+  flex-shrink: 0;
+  width: 18px;
 }
 
 .rr-remove {

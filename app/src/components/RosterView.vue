@@ -36,7 +36,7 @@ function poolCardId(player: PoolPlayer): number {
 const allPlayers = computed((): PoolPlayer[] => {
   let pitchers: PitcherCard[] = cardStore.pitchers;
   let hitters: HitterCard[] = cardStore.hitters;
-  if (settingsStore.ownedOnly) {
+  if (settingsStore.ownedOnly && cardStore.loadedFrom !== "bundled") {
     pitchers = pitchers.filter((p) => p.owned);
     hitters = hitters.filter((h) => h.owned);
   }
@@ -183,6 +183,13 @@ function eligiblePositions(player: PoolPlayer): string {
         </select>
       </div>
       <span class="filter-count">{{ filteredPlayers.length }} shown</span>
+      <button
+        class="filter-clear-btn"
+        :disabled="rosterStore.totalPlayers === 0"
+        @click="rosterStore.clearRoster()"
+      >
+        Clear roster
+      </button>
     </div>
 
     <!-- Table -->
@@ -331,6 +338,30 @@ function eligiblePositions(player: PoolPlayer): string {
   margin-left: auto;
   font-size: 0.63rem;
   color: #334155;
+}
+
+.filter-clear-btn {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  color: #64748b;
+  font-size: 0.68rem;
+  padding: 2px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
+}
+
+.filter-clear-btn:hover:not(:disabled) {
+  color: #f87171;
+  border-color: rgba(248, 113, 113, 0.4);
+}
+
+.filter-clear-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
 }
 
 /* ── Table ── */
