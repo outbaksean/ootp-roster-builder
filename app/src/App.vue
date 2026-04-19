@@ -2,22 +2,27 @@
 import { ref } from "vue";
 import { useRosterStore } from "./stores/useRosterStore";
 import { useSettingsStore } from "./stores/useSettingsStore";
+import { useCardStore } from "./stores/useCardStore";
 import { ROSTER_TYPES } from "./models/types";
 import CardUploader from "./components/CardUploader.vue";
 import PitchingView from "./components/PitchingView.vue";
 import LineupsView from "./components/LineupsView.vue";
 import RosterView from "./components/RosterView.vue";
 import DepthChartView from "./components/DepthChartView.vue";
+import HelpModal from "./components/HelpModal.vue";
 
 type Tab = "pitching" | "lineups" | "roster" | "depth";
 
 const rosterStore = useRosterStore();
 const settingsStore = useSettingsStore();
+const cardStore = useCardStore();
+const isBundled = () => cardStore.loadedFrom === "bundled";
 
 const activeTab = ref<Tab>("roster");
 
 const SIDEBAR_KEY = "ootp-rb-sidebar-collapsed";
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_KEY) === "true");
+const showHelp = ref(false);
 
 function toggleSidebar() {
   sidebarCollapsed.value = !sidebarCollapsed.value;
@@ -33,6 +38,9 @@ function toggleSidebar() {
         <a href="https://cratervar.com" class="nav-home">cratervar.com</a>
         <span class="nav-sep">|</span>
         <span class="nav-title">OOTP Roster Builder</span>
+      </div>
+      <div class="nav-right">
+        <button class="nav-help" @click="showHelp = true">?</button>
       </div>
       <div class="nav-tabs">
         <button
@@ -105,11 +113,15 @@ function toggleSidebar() {
         </div>
 
         <div class="sidebar-section">
-          <label class="sidebar-toggle-row">
+          <label
+            class="sidebar-toggle-row"
+            :class="{ 'toggle-disabled': isBundled() }"
+          >
             <span class="sidebar-label-inline">Owned cards only</span>
             <input
               type="checkbox"
-              :checked="settingsStore.ownedOnly"
+              :checked="settingsStore.ownedOnly && !isBundled()"
+              :disabled="isBundled()"
               @change="
                 settingsStore.setOwnedOnly(
                   ($event.target as HTMLInputElement).checked,
@@ -149,6 +161,7 @@ function toggleSidebar() {
         <DepthChartView v-else />
       </main>
     </div>
+    <HelpModal :show="showHelp" @close="showHelp = false" />
   </div>
 </template>
 
@@ -199,6 +212,36 @@ function toggleSidebar() {
   font-size: 0.82rem;
   font-weight: 600;
   color: #f1f5f9;
+}
+
+.nav-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 12px;
+}
+
+.nav-help {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 50%;
+  color: #64748b;
+  font-size: 0.75rem;
+  font-weight: 700;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition:
+    color 0.12s,
+    border-color 0.12s;
+}
+
+.nav-help:hover {
+  color: #cbd5e1;
+  border-color: rgba(255, 255, 255, 0.3);
 }
 
 .nav-tabs {
@@ -291,6 +334,11 @@ function toggleSidebar() {
 .sidebar-label-inline {
   font-size: 0.78rem;
   color: #cbd5e1;
+}
+
+.toggle-disabled {
+  opacity: 0.4;
+  cursor: default;
 }
 
 .sidebar-summary {

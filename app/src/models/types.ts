@@ -19,14 +19,47 @@ export type CardTier =
   | "Perfect";
 export type BullpenRole =
   | "Closer"
+  | "Stopper"
+  | "Setup"
+  | "Specialist"
   | "MiddleRelief"
   | "LongRelief"
-  | "Specialist";
+  | "EmergencySP"
+  | "NoneSpecified";
+export type SecondaryRole =
+  | "Closer"
+  | "Stopper"
+  | "Setup"
+  | "Specialist"
+  | "MiddleRelief"
+  | "LongRelief"
+  | "EmergencySP"
+  | "NoneSpecified"
+  | "HighLeverage"
+  | "MopUp"
+  | "Opener"
+  | "Follower"
+  | "None";
+export type RpUsage =
+  | "UseMoreOften"
+  | "NormalUsage"
+  | "UseLessOften"
+  | "AvoidHighLeverage";
 export type UtilityStarts =
+  | "Never"
   | "IfStarterTired"
+  | "Ev2ndGame"
   | "Every3rdGame"
+  | "Ev4thGame"
   | "Every5thGame"
-  | "Never";
+  | "Ev6thGame"
+  | "Ev7thGame"
+  | "Ev8thGame"
+  | "Ev9thGame"
+  | "Ev10thGame"
+  | "Ev12thGame"
+  | "Ev15thGame"
+  | "Ev20thGame";
 
 export const FIELDING_POSITIONS: FieldingPosition[] = [
   "C",
@@ -52,16 +85,53 @@ export const ALL_HITTER_POSITIONS: HitterPosition[] = [
 
 export const BULLPEN_ROLE_LABELS: Record<BullpenRole, string> = {
   Closer: "Closer",
+  Stopper: "Stopper",
+  Setup: "Setup",
+  Specialist: "Specialist",
   MiddleRelief: "Middle Relief",
   LongRelief: "Long Relief",
+  EmergencySP: "Emergency SP",
+  NoneSpecified: "None specified",
+};
+
+export const SECONDARY_ROLE_LABELS: Record<SecondaryRole, string> = {
+  Closer: "Closer",
+  Stopper: "Stopper",
+  Setup: "Setup",
   Specialist: "Specialist",
+  MiddleRelief: "Middle Relief",
+  LongRelief: "Long Relief",
+  EmergencySP: "Emergency SP",
+  NoneSpecified: "None specified",
+  HighLeverage: "High Leverage",
+  MopUp: "Mop-up",
+  Opener: "Opener",
+  Follower: "Follower",
+  None: "-",
+};
+
+export const RP_USAGE_LABELS: Record<RpUsage, string> = {
+  UseMoreOften: "Use more often",
+  NormalUsage: "Normal Usage",
+  UseLessOften: "Use less often",
+  AvoidHighLeverage: "Avoid high leverage",
 };
 
 export const UTILITY_STARTS_LABELS: Record<UtilityStarts, string> = {
-  IfStarterTired: "If Starter Tired",
-  Every3rdGame: "Every 3rd Game",
-  Every5thGame: "Every 5th Game",
   Never: "Never",
+  IfStarterTired: "If Starter Tired",
+  Ev2ndGame: "Ev. 2nd Game",
+  Every3rdGame: "Ev. 3rd Game",
+  Ev4thGame: "Ev. 4th Game",
+  Every5thGame: "Ev. 5th Game",
+  Ev6thGame: "Ev. 6th Game",
+  Ev7thGame: "Ev. 7th Game",
+  Ev8thGame: "Ev. 8th Game",
+  Ev9thGame: "Ev. 9th Game",
+  Ev10thGame: "Ev. 10th Game",
+  Ev12thGame: "Ev. 12th Game",
+  Ev15thGame: "Ev. 15th Game",
+  Ev20thGame: "Ev. 20th Game",
 };
 
 export function getTier(overall: number): CardTier {
@@ -207,6 +277,8 @@ export type RosterPitcher = {
   role: "SP" | "RP";
   order: number;
   bullpenRole: BullpenRole;
+  secondaryRole: SecondaryRole;
+  usage: RpUsage;
 };
 
 export type DepthSlot = {
