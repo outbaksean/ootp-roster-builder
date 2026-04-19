@@ -2,9 +2,9 @@
 import { ref, computed } from "vue";
 import { useCardStore } from "@/stores/useCardStore";
 import { useRosterStore } from "@/stores/useRosterStore";
-import { useSettingsStore } from "@/stores/useSettingsStore";
 import {
   ALL_HITTER_POSITIONS,
+  FIELDING_POSITIONS,
   UTILITY_STARTS_LABELS,
   getPosRating,
 } from "@/models/types";
@@ -17,18 +17,17 @@ import type {
 
 const cardStore = useCardStore();
 const rosterStore = useRosterStore();
-const settingsStore = useSettingsStore();
 
 const activeSide = ref<"vr" | "vl">("vr");
 
 function switchSide(side: "vr" | "vl") {
-  if (activeSide.value !== side) {
-    activeSide.value = side;
+  if (side !== activeSide.value) {
     rosterStore.setActiveSlot(null);
+    activeSide.value = side;
   }
 }
 
-// ── Hitter table ─────────────────────────────────────────────────────────────
+// ── Hitter roster panel ───────────────────────────────────────────────────────
 
 const positionFilter = computed<FieldingPosition | null>(() => {
   const slot = rosterStore.activeSlot;
@@ -37,62 +36,63 @@ const positionFilter = computed<FieldingPosition | null>(() => {
   return slot.position as FieldingPosition;
 });
 
-const visibleHitters = computed(() => {
-  let list = cardStore.hitters;
-  if (settingsStore.ownedOnly) list = list.filter((h) => h.owned);
+const rosterHitters = computed(() => {
+  let list = rosterStore.roster.rosterHitterIds
+    .map((id) => (id !== null ? (cardStore.hitterById.get(id) ?? null) : null))
+    .filter((h): h is HitterCard => h !== null);
+
   const posFilter = positionFilter.value;
   if (posFilter) {
     list = list.filter((h) => getPosRating(h.defense, posFilter) > 0);
   }
-  const slot = rosterStore.activeSlot;
-  return list.slice().sort((a, b) => {
-    if (slot?.kind === "lineup" && slot.side === "vr")
-      return b.vRScore - a.vRScore;
-    if (slot?.kind === "lineup" && slot.side === "vl")
-      return b.vLScore - a.vLScore;
-    return b.overall - a.overall;
-  });
+
+  return list.sort((a, b) => b.overall - a.overall);
 });
 
 const hitterAssignments = computed(() => {
   const map = new Map<number, string>();
   const lineup = rosterStore.getLineup(activeSide.value);
-  lineup.slots.forEach((s: { cardId: number | null }, i: number) => {
-    if (s.cardId != null) map.set(s.cardId, `#${i + 1}`);
+  lineup.battingOrder.forEach((pos, i) => {
+    if (pos != null) {
+      const cardId = lineup.depth[pos].depthStarterCardId;
+      if (cardId != null) map.set(cardId, `#${i + 1} ${pos}`);
+    }
   });
   for (const pos of ALL_HITTER_POSITIONS) {
     const d = lineup.depth[pos];
-    if (d.depthStarterCardId != null) map.set(d.depthStarterCardId, `${pos}`);
-    if (d.utility1CardId != null) map.set(d.utility1CardId, `U1 ${pos}`);
-    if (d.utility2CardId != null) map.set(d.utility2CardId, `U2 ${pos}`);
-    if (d.defSubCardId != null) map.set(d.defSubCardId, `DS ${pos}`);
+    if (d.depthStarterCardId != null && !map.has(d.depthStarterCardId))
+      map.set(d.depthStarterCardId, pos);
+    if (d.utility1CardId != null && !map.has(d.utility1CardId))
+      map.set(d.utility1CardId, `U1 ${pos}`);
+    if (d.utility2CardId != null && !map.has(d.utility2CardId))
+      map.set(d.utility2CardId, `U2 ${pos}`);
+    if (d.defSubCardId != null && !map.has(d.defSubCardId))
+      map.set(d.defSubCardId, `DS ${pos}`);
   }
-  lineup.pinchHitters.forEach((id: number | null, i: number) => {
-    if (id != null) map.set(id, `PH${i + 1}`);
+  lineup.pinchHitters.forEach((id, i) => {
+    if (id != null && !map.has(id)) map.set(id, `PH${i + 1}`);
   });
-  lineup.pinchRunners.forEach((id: number | null, i: number) => {
-    if (id != null) map.set(id, `PR${i + 1}`);
+  lineup.pinchRunners.forEach((id, i) => {
+    if (id != null && !map.has(id)) map.set(id, `PR${i + 1}`);
   });
   return map;
 });
 
 const canAssignHitter = computed(() => rosterStore.activeSlotType === "hitter");
 
-function handleRowClick(hitter: HitterCard) {
+function eligiblePositions(hitter: HitterCard): string {
+  const positions = FIELDING_POSITIONS.filter(
+    (pos) => getPosRating(hitter.defense, pos) > 0,
+  );
+  return positions.length > 0 ? positions.join(" ") : "--";
+}
+
+function handleHitterClick(cardId: number) {
   const slot = rosterStore.activeSlot;
   if (!slot || rosterStore.activeSlotType !== "hitter") return;
-  rosterStore.assignToActiveSlot(hitter.cardId);
-  // auto-advance
+  rosterStore.assignToActiveSlot(cardId);
   const side = activeSide.value;
-  if (slot.kind === "lineup") {
-    const ln = rosterStore.getLineup(side);
-    for (let i = slot.order + 1; i <= 9; i++) {
-      if (ln.slots[i - 1].cardId == null) {
-        rosterStore.setActiveSlot({ kind: "lineup", side, order: i });
-        return;
-      }
-    }
-  } else if (slot.kind === "pinchHitter") {
+  if (slot.kind === "pinchHitter") {
     const ln = rosterStore.getLineup(side);
     for (let i = slot.order + 1; i <= 4; i++) {
       if (ln.pinchHitters[i - 1] == null) {
@@ -112,25 +112,60 @@ function handleRowClick(hitter: HitterCard) {
   rosterStore.setActiveSlot(null);
 }
 
-// ── Lineup panel ─────────────────────────────────────────────────────────────
+// ── Lineup config ─────────────────────────────────────────────────────────────
 
-const lineupSlots = computed(() =>
-  Array.from({ length: 9 }, (_, i) => {
-    const order = i + 1;
-    const s = rosterStore.getLineup(activeSide.value).slots[i];
-    return {
-      order,
-      card: s.cardId ? cardStore.hitterById.get(s.cardId) : undefined,
-      position: s.position,
-      active:
-        rosterStore.activeSlot?.kind === "lineup" &&
-        rosterStore.activeSlot.side === activeSide.value &&
-        rosterStore.activeSlot.order === order,
-    };
-  }),
+const battingOrder = computed(
+  () => rosterStore.getLineup(activeSide.value).battingOrder,
 );
 
-// ── Depth chart ───────────────────────────────────────────────────────────────
+function lineupDepthCard(pos: HitterPosition) {
+  const id = rosterStore.getLineup(activeSide.value).depth[pos]
+    .depthStarterCardId;
+  return id ? cardStore.hitterById.get(id) : undefined;
+}
+
+// ── Batting order reorder drag ────────────────────────────────────────────────
+
+const lineupDragIdx = ref<number | null>(null);
+const lineupDragOver = ref<number | null>(null);
+
+function onLineupRowDragStart(event: DragEvent, idx: number) {
+  if (battingOrder.value[idx] === null) {
+    event.preventDefault();
+    return;
+  }
+  lineupDragIdx.value = idx;
+  event.dataTransfer?.setData("text/plain", String(idx));
+}
+
+function onLineupRowDragOver(event: DragEvent, idx: number) {
+  if (lineupDragIdx.value === null) return;
+  event.preventDefault();
+  lineupDragOver.value = idx;
+}
+
+function onLineupRowDragLeave(event: DragEvent, idx: number) {
+  const el = event.currentTarget as Element;
+  const related = event.relatedTarget as Node | null;
+  if (!related || !el.contains(related)) {
+    if (lineupDragOver.value === idx) lineupDragOver.value = null;
+  }
+}
+
+function onLineupRowDrop(event: DragEvent, toIdx: number) {
+  event.preventDefault();
+  lineupDragOver.value = null;
+  const fromIdx = lineupDragIdx.value;
+  lineupDragIdx.value = null;
+  if (fromIdx !== null && fromIdx !== toIdx) {
+    rosterStore.reorderBattingOrder(activeSide.value, fromIdx, toIdx);
+  }
+}
+
+function onLineupRowDragEnd() {
+  lineupDragIdx.value = null;
+  lineupDragOver.value = null;
+}
 
 function depthCard(
   pos: HitterPosition,
@@ -169,8 +204,6 @@ function utilityStarts(
   return slot === "utility1" ? d.utility1Starts : d.utility2Starts;
 }
 
-// ── Bench ─────────────────────────────────────────────────────────────────────
-
 function benchCard(type: "pinchHitter" | "pinchRunner", order: number) {
   const ln = rosterStore.getLineup(activeSide.value);
   const id =
@@ -185,127 +218,162 @@ function benchSlotActive(type: "pinchHitter" | "pinchRunner", order: number) {
   return a?.kind === type && a.side === activeSide.value && a.order === order;
 }
 
-// ── Formatting ────────────────────────────────────────────────────────────────
+// ── Drag and drop ─────────────────────────────────────────────────────────────
 
-function formatPrice(price: number): string {
-  if (price === 0) return "--";
-  if (price >= 1000) return `${(price / 1000).toFixed(1)}k`;
-  return String(price);
+const dragOverSlot = ref<string | null>(null);
+const draggingCardId = ref<number | null>(null);
+
+function isEligibleForPos(cardId: number, pos: HitterPosition): boolean {
+  if (pos === "DH") return true;
+  const hitter = cardStore.hitterById.get(cardId);
+  return !!hitter && getPosRating(hitter.defense, pos as FieldingPosition) > 0;
 }
 
-function formatScore(score: number): string {
-  return score.toFixed(1);
+function onDragStart(event: DragEvent, cardId: number) {
+  event.dataTransfer?.setData("text/plain", String(cardId));
+  draggingCardId.value = cardId;
 }
 
-function defRating(card: HitterCard, pos: FieldingPosition): string {
-  const r = getPosRating(card.defense, pos);
-  return r > 0 ? String(r) : "--";
+function onDragEnd() {
+  draggingCardId.value = null;
+  dragOverSlot.value = null;
 }
 
-const FIELDING_COLS: FieldingPosition[] = [
-  "C",
-  "1B",
-  "2B",
-  "3B",
-  "SS",
-  "LF",
-  "CF",
-  "RF",
-];
+function onSlotDragOver(event: DragEvent, key: string) {
+  event.preventDefault();
+  dragOverSlot.value = key;
+}
+
+function onDepthSlotDragOver(
+  event: DragEvent,
+  key: string,
+  pos: HitterPosition,
+) {
+  const cid = draggingCardId.value;
+  if (cid !== null && !isEligibleForPos(cid, pos)) return;
+  event.preventDefault();
+  dragOverSlot.value = key;
+}
+
+function onSlotDragLeave(event: DragEvent, key: string) {
+  const el = event.currentTarget as Element;
+  const related = event.relatedTarget as Node | null;
+  if (!related || !el.contains(related)) {
+    if (dragOverSlot.value === key) dragOverSlot.value = null;
+  }
+}
+
+function onDepthDrop(
+  event: DragEvent,
+  pos: HitterPosition,
+  slot: "depth" | "utility1" | "utility2" | "defSub",
+) {
+  event.preventDefault();
+  dragOverSlot.value = null;
+  const cardId = Number(event.dataTransfer?.getData("text/plain"));
+  if (
+    cardId &&
+    rosterStore.rosterHitterIdSet.has(cardId) &&
+    isEligibleForPos(cardId, pos)
+  ) {
+    rosterStore.assignDepthSlot(activeSide.value, pos, slot, cardId);
+    rosterStore.setActiveSlot(null);
+  }
+}
+
+function onBenchDrop(
+  event: DragEvent,
+  type: "pinchHitter" | "pinchRunner",
+  order: number,
+) {
+  event.preventDefault();
+  dragOverSlot.value = null;
+  const cardId = Number(event.dataTransfer?.getData("text/plain"));
+  if (cardId && rosterStore.rosterHitterIdSet.has(cardId)) {
+    rosterStore.assignBenchSlot(activeSide.value, type, order, cardId);
+    rosterStore.setActiveSlot(null);
+  }
+}
 </script>
 
 <template>
   <div class="lineups-view">
-    <!-- Sub-tabs -->
-    <div class="subtab-bar">
+    <!-- VS RHP / VS LHP tabs -->
+    <div class="side-tab-bar">
       <button
-        class="subtab"
-        :class="{ 'subtab-active': activeSide === 'vr' }"
+        class="side-tab"
+        :class="{ 'side-tab-active': activeSide === 'vr' }"
         @click="switchSide('vr')"
       >
         VS RHP
       </button>
       <button
-        class="subtab"
-        :class="{ 'subtab-active': activeSide === 'vl' }"
+        class="side-tab"
+        :class="{ 'side-tab-active': activeSide === 'vl' }"
         @click="switchSide('vl')"
       >
         VS LHP
       </button>
     </div>
 
-    <!-- Top: hitter table -->
-    <div class="table-panel">
-      <table class="card-table">
-        <thead>
-          <tr>
-            <th class="th-badge"></th>
-            <th class="th-name">Name</th>
-            <th class="th-hand">B</th>
-            <th class="th-num">OVR</th>
-            <th class="th-num">vR</th>
-            <th class="th-num">vL</th>
-            <th v-for="pos in FIELDING_COLS" :key="pos" class="th-def">
-              {{ pos }}
-            </th>
-            <th class="th-tier">Tier</th>
-            <th class="th-price">Price</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr
-            v-for="h in visibleHitters"
-            :key="h.cardId"
-            :class="{
-              'row-assigned': hitterAssignments.has(h.cardId),
-              'row-clickable': canAssignHitter,
-            }"
-            @click="handleRowClick(h)"
+    <!-- Hitter roster panel -->
+    <div class="roster-panel">
+      <div class="roster-panel-header">
+        <span class="roster-panel-label">
+          Hitters on Roster
+          <span v-if="positionFilter" class="pos-filter-label"
+            >— filtering for {{ positionFilter }}</span
           >
-            <td class="td-badge">
-              <span
-                v-if="hitterAssignments.has(h.cardId)"
-                class="assignment-badge"
-              >
-                {{ hitterAssignments.get(h.cardId) }}
-              </span>
-            </td>
-            <td class="td-name">
-              <span class="player-name">{{ h.name }}</span>
-              <span v-if="h.cardTitle" class="card-title">{{
-                h.cardTitle
-              }}</span>
-            </td>
-            <td class="td-hand" :class="`hand-${h.bats}`">
-              {{ h.bats ?? "--" }}
-            </td>
-            <td class="td-num">{{ h.overall }}</td>
-            <td class="td-num td-score">{{ formatScore(h.vRScore) }}</td>
-            <td class="td-num td-score">{{ formatScore(h.vLScore) }}</td>
-            <td v-for="pos in FIELDING_COLS" :key="pos" class="td-def">
-              {{ defRating(h, pos) }}
-            </td>
-            <td class="td-tier">
-              <span class="tier-badge" :class="`tier-${h.tier}`">{{
-                h.tier
-              }}</span>
-            </td>
-            <td class="td-price">{{ formatPrice(h.sellOrderLow) }}</td>
-          </tr>
-          <tr v-if="visibleHitters.length === 0">
-            <td :colspan="16" class="empty-row">
-              {{
-                cardStore.hasCards
-                  ? "No hitters match filter"
-                  : "Upload pt_card_list.csv to load cards"
-              }}
-            </td>
-          </tr>
-        </tbody>
-      </table>
+        </span>
+        <span class="roster-panel-count"
+          >{{ rosterStore.rosterHitterIdSet.size }}/{{
+            rosterStore.era.totalHitters
+          }}</span
+        >
+      </div>
+      <div class="roster-list">
+        <div
+          v-for="hitter in rosterHitters"
+          :key="hitter.cardId"
+          class="roster-row"
+          :class="{
+            'roster-row--clickable': canAssignHitter,
+            'roster-row--assigned': hitterAssignments.has(hitter.cardId),
+          }"
+          draggable="true"
+          @dragstart="onDragStart($event, hitter.cardId)"
+          @dragend="onDragEnd"
+          @click="canAssignHitter && handleHitterClick(hitter.cardId)"
+        >
+          <span class="rr-name">{{ hitter.cardTitle || hitter.name }}</span>
+          <span class="rr-pos">{{ eligiblePositions(hitter) }}</span>
+          <span class="rr-ovr">{{ hitter.overall }}</span>
+          <span v-if="hitterAssignments.has(hitter.cardId)" class="rr-badge">
+            {{ hitterAssignments.get(hitter.cardId) }}
+          </span>
+          <button
+            class="rr-remove"
+            @click.stop="rosterStore.removeFromRoster(hitter.cardId)"
+          >
+            x
+          </button>
+        </div>
+        <div
+          v-if="
+            rosterHitters.length === 0 &&
+            rosterStore.rosterHitterIdSet.size === 0
+          "
+          class="roster-empty"
+        >
+          No hitters on roster. Add from the Roster tab.
+        </div>
+        <div v-else-if="rosterHitters.length === 0" class="roster-empty">
+          No eligible hitters on roster for this position.
+        </div>
+      </div>
     </div>
 
-    <!-- Bottom: config panels -->
+    <!-- Lineup / Depth / Bench config -->
     <div class="config-panel">
       <!-- Lineup order -->
       <div class="config-section lineup-section">
@@ -314,74 +382,30 @@ const FIELDING_COLS: FieldingPosition[] = [
         </div>
         <div class="slot-list">
           <div
-            v-for="slot in lineupSlots"
-            :key="slot.order"
+            v-for="(pos, idx) in battingOrder"
+            :key="idx"
             class="lineup-slot"
-            :class="{ 'slot-active': slot.active, 'slot-filled': !!slot.card }"
-            @click="
-              rosterStore.setActiveSlot({
-                kind: 'lineup',
-                side: activeSide,
-                order: slot.order,
-              })
-            "
+            :class="{
+              'slot-filled': pos !== null,
+              'lineup-drag-over': lineupDragOver === idx,
+            }"
+            draggable="true"
+            @dragstart="onLineupRowDragStart($event, idx)"
+            @dragover="onLineupRowDragOver($event, idx)"
+            @dragleave="onLineupRowDragLeave($event, idx)"
+            @drop="onLineupRowDrop($event, idx)"
+            @dragend="onLineupRowDragEnd"
           >
-            <span class="slot-num">{{ slot.order }}</span>
-            <template v-if="slot.card">
-              <span class="slot-hand" :class="`hand-${slot.card.bats}`">
-                {{ slot.card.bats ?? "--" }}
-              </span>
-              <span class="slot-name">{{ slot.card.name }}</span>
-              <select
-                class="pos-select"
-                :value="slot.position ?? ''"
-                @click.stop
-                @change="
-                  rosterStore.setLineupPosition(
-                    activeSide,
-                    slot.order,
-                    (($event.target as HTMLSelectElement)
-                      .value as HitterPosition) || null,
-                  )
-                "
-              >
-                <option value="">---</option>
-                <option
-                  v-for="pos in ALL_HITTER_POSITIONS"
-                  :key="pos"
-                  :value="pos"
-                >
-                  {{ pos }}
-                </option>
-              </select>
-              <div class="slot-actions">
-                <button
-                  class="act-btn"
-                  @click.stop="
-                    rosterStore.moveLineupSlot(activeSide, slot.order, 'up')
-                  "
-                >
-                  up
-                </button>
-                <button
-                  class="act-btn"
-                  @click.stop="
-                    rosterStore.moveLineupSlot(activeSide, slot.order, 'down')
-                  "
-                >
-                  dn
-                </button>
-                <button
-                  class="act-btn act-clear"
-                  @click.stop="
-                    rosterStore.clearLineupSlot(activeSide, slot.order)
-                  "
-                >
-                  x
-                </button>
-              </div>
+            <span class="slot-num">{{ idx + 1 }}</span>
+            <template v-if="pos !== null">
+              <span class="lineup-pos">{{ pos }}</span>
+              <span class="slot-name">{{
+                lineupDepthCard(pos)?.cardTitle ||
+                lineupDepthCard(pos)?.name ||
+                "(empty)"
+              }}</span>
             </template>
-            <span v-else class="slot-empty">Click to assign</span>
+            <span v-else class="slot-empty">---</span>
           </div>
         </div>
       </div>
@@ -408,11 +432,16 @@ const FIELDING_COLS: FieldingPosition[] = [
               <tr v-for="pos in ALL_HITTER_POSITIONS" :key="pos">
                 <td class="dth-pos-label">{{ pos }}</td>
 
-                <!-- Depth Starter -->
                 <td>
                   <div
                     class="depth-slot"
-                    :class="{ 'depth-active': depthSlotActive(pos, 'depth') }"
+                    :class="{
+                      'depth-active': depthSlotActive(pos, 'depth'),
+                      'slot-eligible':
+                        draggingCardId !== null &&
+                        isEligibleForPos(draggingCardId, pos),
+                      'slot-drag-over': dragOverSlot === `depth-${pos}-depth`,
+                    }"
                     @click="
                       rosterStore.setActiveSlot({
                         kind: 'depth',
@@ -421,9 +450,15 @@ const FIELDING_COLS: FieldingPosition[] = [
                         slot: 'depth',
                       })
                     "
+                    @dragover="
+                      onDepthSlotDragOver($event, `depth-${pos}-depth`, pos)
+                    "
+                    @dragleave="onSlotDragLeave($event, `depth-${pos}-depth`)"
+                    @drop="onDepthDrop($event, pos, 'depth')"
                   >
                     <template v-if="depthCard(pos, 'depth')">
                       <span class="depth-name">{{
+                        depthCard(pos, "depth")!.cardTitle ||
                         depthCard(pos, "depth")!.name
                       }}</span>
                       <button
@@ -439,12 +474,16 @@ const FIELDING_COLS: FieldingPosition[] = [
                   </div>
                 </td>
 
-                <!-- Utility 1 -->
                 <td>
                   <div
                     class="depth-slot"
                     :class="{
                       'depth-active': depthSlotActive(pos, 'utility1'),
+                      'slot-eligible':
+                        draggingCardId !== null &&
+                        isEligibleForPos(draggingCardId, pos),
+                      'slot-drag-over':
+                        dragOverSlot === `depth-${pos}-utility1`,
                     }"
                     @click="
                       rosterStore.setActiveSlot({
@@ -454,9 +493,17 @@ const FIELDING_COLS: FieldingPosition[] = [
                         slot: 'utility1',
                       })
                     "
+                    @dragover="
+                      onDepthSlotDragOver($event, `depth-${pos}-utility1`, pos)
+                    "
+                    @dragleave="
+                      onSlotDragLeave($event, `depth-${pos}-utility1`)
+                    "
+                    @drop="onDepthDrop($event, pos, 'utility1')"
                   >
                     <template v-if="depthCard(pos, 'utility1')">
                       <span class="depth-name">{{
+                        depthCard(pos, "utility1")!.cardTitle ||
                         depthCard(pos, "utility1")!.name
                       }}</span>
                       <button
@@ -499,12 +546,16 @@ const FIELDING_COLS: FieldingPosition[] = [
                   </select>
                 </td>
 
-                <!-- Utility 2 -->
                 <td>
                   <div
                     class="depth-slot"
                     :class="{
                       'depth-active': depthSlotActive(pos, 'utility2'),
+                      'slot-eligible':
+                        draggingCardId !== null &&
+                        isEligibleForPos(draggingCardId, pos),
+                      'slot-drag-over':
+                        dragOverSlot === `depth-${pos}-utility2`,
                     }"
                     @click="
                       rosterStore.setActiveSlot({
@@ -514,9 +565,17 @@ const FIELDING_COLS: FieldingPosition[] = [
                         slot: 'utility2',
                       })
                     "
+                    @dragover="
+                      onDepthSlotDragOver($event, `depth-${pos}-utility2`, pos)
+                    "
+                    @dragleave="
+                      onSlotDragLeave($event, `depth-${pos}-utility2`)
+                    "
+                    @drop="onDepthDrop($event, pos, 'utility2')"
                   >
                     <template v-if="depthCard(pos, 'utility2')">
                       <span class="depth-name">{{
+                        depthCard(pos, "utility2")!.cardTitle ||
                         depthCard(pos, "utility2")!.name
                       }}</span>
                       <button
@@ -559,11 +618,16 @@ const FIELDING_COLS: FieldingPosition[] = [
                   </select>
                 </td>
 
-                <!-- Defense Sub -->
                 <td>
                   <div
                     class="depth-slot"
-                    :class="{ 'depth-active': depthSlotActive(pos, 'defSub') }"
+                    :class="{
+                      'depth-active': depthSlotActive(pos, 'defSub'),
+                      'slot-eligible':
+                        draggingCardId !== null &&
+                        isEligibleForPos(draggingCardId, pos),
+                      'slot-drag-over': dragOverSlot === `depth-${pos}-defSub`,
+                    }"
                     @click="
                       rosterStore.setActiveSlot({
                         kind: 'depth',
@@ -572,9 +636,15 @@ const FIELDING_COLS: FieldingPosition[] = [
                         slot: 'defSub',
                       })
                     "
+                    @dragover="
+                      onDepthSlotDragOver($event, `depth-${pos}-defSub`, pos)
+                    "
+                    @dragleave="onSlotDragLeave($event, `depth-${pos}-defSub`)"
+                    @drop="onDepthDrop($event, pos, 'defSub')"
                   >
                     <template v-if="depthCard(pos, 'defSub')">
                       <span class="depth-name">{{
+                        depthCard(pos, "defSub")!.cardTitle ||
                         depthCard(pos, "defSub")!.name
                       }}</span>
                       <button
@@ -601,7 +671,6 @@ const FIELDING_COLS: FieldingPosition[] = [
           <span class="section-title">Bench</span>
         </div>
         <div class="bench-body">
-          <!-- Pinch Hitters -->
           <div class="bench-group">
             <div class="bench-group-label">Pinch Hitters</div>
             <div
@@ -611,6 +680,8 @@ const FIELDING_COLS: FieldingPosition[] = [
               :class="{
                 'slot-active': benchSlotActive('pinchHitter', order),
                 'slot-filled': !!benchCard('pinchHitter', order),
+                'slot-eligible': draggingCardId !== null,
+                'slot-drag-over': dragOverSlot === `ph-${order}`,
               }"
               @click="
                 rosterStore.setActiveSlot({
@@ -619,10 +690,14 @@ const FIELDING_COLS: FieldingPosition[] = [
                   order,
                 })
               "
+              @dragover="onSlotDragOver($event, `ph-${order}`)"
+              @dragleave="onSlotDragLeave($event, `ph-${order}`)"
+              @drop="onBenchDrop($event, 'pinchHitter', order)"
             >
               <span class="slot-num">{{ order }}</span>
               <template v-if="benchCard('pinchHitter', order)">
                 <span class="slot-name">{{
+                  benchCard("pinchHitter", order)!.cardTitle ||
                   benchCard("pinchHitter", order)!.name
                 }}</span>
                 <button
@@ -638,7 +713,6 @@ const FIELDING_COLS: FieldingPosition[] = [
             </div>
           </div>
 
-          <!-- Pinch Runners -->
           <div class="bench-group">
             <div class="bench-group-label">Pinch Runners</div>
             <div
@@ -648,6 +722,8 @@ const FIELDING_COLS: FieldingPosition[] = [
               :class="{
                 'slot-active': benchSlotActive('pinchRunner', order),
                 'slot-filled': !!benchCard('pinchRunner', order),
+                'slot-eligible': draggingCardId !== null,
+                'slot-drag-over': dragOverSlot === `pr-${order}`,
               }"
               @click="
                 rosterStore.setActiveSlot({
@@ -656,10 +732,14 @@ const FIELDING_COLS: FieldingPosition[] = [
                   order,
                 })
               "
+              @dragover="onSlotDragOver($event, `pr-${order}`)"
+              @dragleave="onSlotDragLeave($event, `pr-${order}`)"
+              @drop="onBenchDrop($event, 'pinchRunner', order)"
             >
               <span class="slot-num">{{ order }}</span>
               <template v-if="benchCard('pinchRunner', order)">
                 <span class="slot-name">{{
+                  benchCard("pinchRunner", order)!.cardTitle ||
                   benchCard("pinchRunner", order)!.name
                 }}</span>
                 <button
@@ -681,7 +761,6 @@ const FIELDING_COLS: FieldingPosition[] = [
 </template>
 
 <style scoped>
-/* ── Layout ── */
 .lineups-view {
   display: flex;
   flex-direction: column;
@@ -689,7 +768,8 @@ const FIELDING_COLS: FieldingPosition[] = [
   overflow: hidden;
 }
 
-.subtab-bar {
+/* ── Side-tab bar ── */
+.side-tab-bar {
   display: flex;
   gap: 2px;
   padding: 0 8px;
@@ -700,8 +780,8 @@ const FIELDING_COLS: FieldingPosition[] = [
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-.subtab {
-  padding: 0 14px;
+.side-tab {
+  padding: 0 16px;
   height: 34px;
   background: none;
   border: none;
@@ -716,219 +796,156 @@ const FIELDING_COLS: FieldingPosition[] = [
     border-color 0.12s;
 }
 
-.subtab:hover {
+.side-tab:hover {
   color: #94a3b8;
 }
 
-.subtab-active {
+.side-tab-active {
   color: #f1f5f9;
   border-bottom-color: #22c55e;
 }
 
-.table-panel {
+/* ── Roster panel ── */
+.roster-panel {
   flex: 1;
   min-height: 0;
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  overflow: hidden;
 }
 
+.roster-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 5px 12px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  flex-shrink: 0;
+}
+
+.roster-panel-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+
+.pos-filter-label {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #22c55e;
+  font-size: 0.63rem;
+}
+
+.roster-panel-count {
+  font-size: 0.65rem;
+  color: #475569;
+}
+
+.roster-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+
+.roster-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  min-height: 30px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
+  transition: background 0.1s;
+  cursor: grab;
+}
+
+.roster-row:active {
+  cursor: grabbing;
+}
+
+.roster-row--clickable {
+  cursor: pointer;
+}
+
+.roster-row--clickable:hover {
+  background: rgba(34, 197, 94, 0.06);
+}
+
+.roster-row--assigned {
+  background: rgba(34, 197, 94, 0.04);
+}
+
+.rr-name {
+  flex: 1;
+  font-size: 0.78rem;
+  color: #e2e8f0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rr-pos {
+  font-size: 0.62rem;
+  color: #475569;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.rr-ovr {
+  font-size: 0.72rem;
+  color: #64748b;
+  flex-shrink: 0;
+  width: 26px;
+  text-align: right;
+}
+
+.rr-badge {
+  font-size: 0.6rem;
+  font-weight: 600;
+  color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+  border-radius: 3px;
+  padding: 1px 5px;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+.rr-remove {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 2px;
+  color: #475569;
+  font-size: 0.6rem;
+  padding: 1px 4px;
+  cursor: pointer;
+  flex-shrink: 0;
+  line-height: 1.3;
+  transition: color 0.1s;
+}
+
+.rr-remove:hover {
+  color: #f87171;
+}
+
+.roster-empty {
+  padding: 16px 12px;
+  font-size: 0.75rem;
+  color: #334155;
+  font-style: italic;
+}
+
+/* ── Config panel ── */
 .config-panel {
-  height: 300px;
+  height: 340px;
   flex-shrink: 0;
   border-top: 1px solid rgba(255, 255, 255, 0.08);
   display: flex;
   overflow: hidden;
 }
 
-/* ── Card table ── */
-.card-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.78rem;
-}
-
-.card-table thead th {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  background: #0f172a;
-  text-align: left;
-  padding: 6px 6px;
-  font-size: 0.61rem;
-  font-weight: 600;
-  letter-spacing: 0.05em;
-  text-transform: uppercase;
-  color: #475569;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-  white-space: nowrap;
-}
-
-.th-badge {
-  width: 46px;
-}
-.th-hand {
-  width: 28px;
-}
-.th-num {
-  width: 40px;
-  text-align: right;
-}
-.th-def {
-  width: 32px;
-  text-align: right;
-}
-.th-tier {
-  width: 68px;
-}
-.th-price {
-  width: 52px;
-  text-align: right;
-}
-
-.card-table tbody tr {
-  border-bottom: 1px solid rgba(255, 255, 255, 0.03);
-  cursor: default;
-}
-
-.card-table tbody tr.row-clickable {
-  cursor: pointer;
-}
-
-.card-table tbody tr:hover {
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.card-table tbody tr.row-clickable:hover {
-  background: rgba(255, 255, 255, 0.05);
-}
-
-.card-table tbody tr.row-assigned {
-  opacity: 0.4;
-}
-
-.card-table td {
-  padding: 4px 6px;
-  vertical-align: middle;
-}
-
-.td-badge {
-  padding-right: 4px;
-}
-
-.td-name {
-  min-width: 0;
-  max-width: 200px;
-}
-
-.player-name {
-  display: block;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: #e2e8f0;
-}
-
-.card-title {
-  display: block;
-  font-size: 0.63rem;
-  color: #475569;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.td-hand {
-  font-weight: 700;
-  font-size: 0.72rem;
-  text-align: center;
-}
-
-.hand-R {
-  color: #60a5fa;
-}
-.hand-L {
-  color: #f87171;
-}
-.hand-S {
-  color: #a78bfa;
-}
-
-.td-num {
-  text-align: right;
-  font-size: 0.73rem;
-  color: #94a3b8;
-}
-
-.td-score {
-  color: #64748b;
-  font-size: 0.7rem;
-}
-
-.td-def {
-  text-align: right;
-  font-size: 0.67rem;
-  color: #475569;
-}
-
-.assignment-badge {
-  display: inline-block;
-  font-size: 0.6rem;
-  font-weight: 600;
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.1);
-  border-radius: 3px;
-  padding: 1px 4px;
-  white-space: nowrap;
-}
-
-.tier-badge {
-  display: inline-block;
-  padding: 1px 5px;
-  border-radius: 3px;
-  font-size: 0.6rem;
-  font-weight: 600;
-  white-space: nowrap;
-}
-
-.tier-Iron {
-  background: #1e293b;
-  color: #64748b;
-}
-.tier-Bronze {
-  background: #292524;
-  color: #d97706;
-}
-.tier-Silver {
-  background: #1e293b;
-  color: #94a3b8;
-}
-.tier-Gold {
-  background: #292524;
-  color: #eab308;
-}
-.tier-Diamond {
-  background: #0f2744;
-  color: #60a5fa;
-}
-.tier-Perfect {
-  background: #1e1244;
-  color: #a78bfa;
-}
-
-.td-price {
-  text-align: right;
-  font-size: 0.7rem;
-  color: #64748b;
-  white-space: nowrap;
-}
-
-.empty-row {
-  padding: 24px 16px;
-  color: #334155;
-  font-style: italic;
-  font-size: 0.78rem;
-}
-
-/* ── Config sections ── */
 .config-section {
   display: flex;
   flex-direction: column;
@@ -986,40 +1003,52 @@ const FIELDING_COLS: FieldingPosition[] = [
   min-height: 30px;
   border-left: 3px solid transparent;
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
-  cursor: pointer;
+  cursor: grab;
   transition:
     background 0.1s,
     border-color 0.1s;
+}
+
+.lineup-slot:active {
+  cursor: grabbing;
 }
 
 .lineup-slot:hover {
   background: rgba(255, 255, 255, 0.03);
 }
 
-.lineup-slot.slot-active {
+.lineup-slot.lineup-drag-over {
   border-left-color: #22c55e;
-  background: rgba(34, 197, 94, 0.05);
+  background: rgba(34, 197, 94, 0.1);
+}
+
+.lineup-pos {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #475569;
+  width: 28px;
+  flex-shrink: 0;
 }
 
 .slot-num {
-  font-size: 0.66rem;
+  font-size: 0.68rem;
   color: #475569;
-  width: 12px;
+  width: 14px;
   text-align: right;
   flex-shrink: 0;
 }
 
 .slot-hand {
-  font-size: 0.68rem;
+  font-size: 0.7rem;
   font-weight: 700;
-  width: 12px;
+  width: 14px;
   text-align: center;
   flex-shrink: 0;
 }
 
 .slot-name {
   flex: 1;
-  font-size: 0.73rem;
+  font-size: 0.76rem;
   color: #e2e8f0;
   min-width: 0;
   overflow: hidden;
@@ -1029,7 +1058,7 @@ const FIELDING_COLS: FieldingPosition[] = [
 
 .slot-empty {
   flex: 1;
-  font-size: 0.67rem;
+  font-size: 0.7rem;
   color: #334155;
   font-style: italic;
 }
@@ -1040,13 +1069,24 @@ const FIELDING_COLS: FieldingPosition[] = [
   flex-shrink: 0;
 }
 
+.pos-select {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 3px;
+  color: #94a3b8;
+  font-size: 0.62rem;
+  padding: 1px 2px;
+  width: 44px;
+  flex-shrink: 0;
+}
+
 .act-btn {
   background: transparent;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 2px;
   color: #64748b;
-  font-size: 0.58rem;
-  padding: 1px 3px;
+  font-size: 0.6rem;
+  padding: 1px 4px;
   cursor: pointer;
   line-height: 1.3;
   transition:
@@ -1061,17 +1101,6 @@ const FIELDING_COLS: FieldingPosition[] = [
 
 .act-clear:hover {
   color: #f87171;
-}
-
-.pos-select {
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 3px;
-  color: #94a3b8;
-  font-size: 0.62rem;
-  padding: 1px 2px;
-  width: 44px;
-  flex-shrink: 0;
 }
 
 /* ── Depth chart ── */
@@ -1115,7 +1144,6 @@ const FIELDING_COLS: FieldingPosition[] = [
 .depth-table tbody tr {
   border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
-
 .depth-table td {
   padding: 3px 6px;
   vertical-align: middle;
@@ -1149,6 +1177,16 @@ const FIELDING_COLS: FieldingPosition[] = [
 .depth-slot.depth-active {
   border-color: #22c55e;
   background: rgba(34, 197, 94, 0.06);
+}
+
+.depth-slot.slot-eligible {
+  border-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.03);
+}
+
+.depth-slot.slot-drag-over {
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
 }
 
 .depth-name {
@@ -1217,5 +1255,26 @@ const FIELDING_COLS: FieldingPosition[] = [
 .bench-slot.slot-active {
   border-left-color: #22c55e;
   background: rgba(34, 197, 94, 0.05);
+}
+
+.bench-slot.slot-eligible {
+  border-left-color: rgba(34, 197, 94, 0.3);
+  background: rgba(34, 197, 94, 0.03);
+}
+
+.bench-slot.slot-drag-over {
+  border-left-color: #22c55e;
+  background: rgba(34, 197, 94, 0.1);
+}
+
+/* ── Hand colors ── */
+.hand-R {
+  color: #60a5fa;
+}
+.hand-L {
+  color: #f87171;
+}
+.hand-S {
+  color: #a78bfa;
 }
 </style>

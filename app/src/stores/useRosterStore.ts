@@ -17,7 +17,6 @@ const ROSTER_KEY = "ootp-rb-roster";
 export type ActiveSlot =
   | { kind: "sp"; order: number }
   | { kind: "rp"; order: number }
-  | { kind: "lineup"; side: "vr" | "vl"; order: number }
   | {
       kind: "depth";
       side: "vr" | "vl";
@@ -46,7 +45,7 @@ function emptyLineupConfig(): LineupConfig {
     depth[pos] = emptyDepthSlot();
   }
   return {
-    slots: Array.from({ length: 9 }, () => ({ cardId: null, position: null })),
+    battingOrder: Array(9).fill(null),
     depth,
     pinchHitters: [null, null, null, null],
     pinchRunners: [null, null, null, null],
@@ -55,18 +54,69 @@ function emptyLineupConfig(): LineupConfig {
 
 function defaultRoster(): Roster {
   return {
+    rosterPitcherIds: Array(12).fill(null),
+    rosterHitterIds: Array(14).fill(null),
     pitchers: [],
     lineupVR: emptyLineupConfig(),
     lineupVL: emptyLineupConfig(),
     rosterTypeId: "league",
     eraId: "standard",
+    spCount: 5,
   };
+}
+
+function migrateRoster(r: Roster): Roster {
+  if (r.spCount == null) r.spCount = 5;
+  for (const side of ["lineupVR", "lineupVL"] as const) {
+    const lu = r[side] as unknown as Record<string, unknown>;
+    if (!lu.battingOrder) {
+      lu.battingOrder = Array(9).fill(null);
+      const oldSlots = lu.slots as
+        | { position: HitterPosition | null }[]
+        | undefined;
+      if (oldSlots) {
+        oldSlots.forEach((s, i) => {
+          if (s.position)
+            (lu.battingOrder as (HitterPosition | null)[])[i] = s.position;
+        });
+        delete lu.slots;
+      }
+    }
+  }
+  if (!r.rosterPitcherIds) {
+    const existing = [...new Set(r.pitchers.map((p) => p.cardId))];
+    const padded: (number | null)[] = [
+      ...existing,
+      ...Array(12).fill(null),
+    ].slice(0, 12);
+    r.rosterPitcherIds = padded;
+  }
+  if (!r.rosterHitterIds) {
+    const seen = new Set<number>();
+    for (const side of [r.lineupVR, r.lineupVL]) {
+      for (const d of Object.values(side.depth) as DepthSlot[]) {
+        if (d.depthStarterCardId != null) seen.add(d.depthStarterCardId);
+        if (d.utility1CardId != null) seen.add(d.utility1CardId);
+        if (d.utility2CardId != null) seen.add(d.utility2CardId);
+        if (d.defSubCardId != null) seen.add(d.defSubCardId);
+      }
+      for (const id of side.pinchHitters) if (id != null) seen.add(id);
+      for (const id of side.pinchRunners) if (id != null) seen.add(id);
+    }
+    const ids = [...seen];
+    const padded: (number | null)[] = [...ids, ...Array(14).fill(null)].slice(
+      0,
+      14,
+    );
+    r.rosterHitterIds = padded;
+  }
+  return r;
 }
 
 function loadRoster(): Roster {
   try {
     const raw = localStorage.getItem(ROSTER_KEY);
-    if (raw) return JSON.parse(raw) as Roster;
+    if (raw) return migrateRoster(JSON.parse(raw) as Roster);
   } catch {
     /* ignore */
   }
@@ -103,25 +153,22 @@ export const useRosterStore = defineStore("roster", () => {
       .sort((a, b) => a.order - b.order),
   );
 
-  // All unique cardIds placed anywhere in the roster
-  const assignedCardIds = computed(() => {
-    const ids = new Set<number>();
-    for (const p of roster.value.pitchers) ids.add(p.cardId);
-    for (const side of [roster.value.lineupVR, roster.value.lineupVL]) {
-      for (const s of side.slots) if (s.cardId != null) ids.add(s.cardId);
-      for (const d of Object.values(side.depth)) {
-        if (d.depthStarterCardId != null) ids.add(d.depthStarterCardId);
-        if (d.utility1CardId != null) ids.add(d.utility1CardId);
-        if (d.utility2CardId != null) ids.add(d.utility2CardId);
-        if (d.defSubCardId != null) ids.add(d.defSubCardId);
-      }
-      for (const id of side.pinchHitters) if (id != null) ids.add(id);
-      for (const id of side.pinchRunners) if (id != null) ids.add(id);
-    }
-    return ids;
-  });
+  const rosterPitcherIdSet = computed(
+    () =>
+      new Set(
+        roster.value.rosterPitcherIds.filter((id): id is number => id !== null),
+      ),
+  );
+  const rosterHitterIdSet = computed(
+    () =>
+      new Set(
+        roster.value.rosterHitterIds.filter((id): id is number => id !== null),
+      ),
+  );
 
-  const totalPlayers = computed(() => assignedCardIds.value.size);
+  const totalPlayers = computed(
+    () => rosterPitcherIdSet.value.size + rosterHitterIdSet.value.size,
+  );
 
   function persist() {
     saveRoster(roster.value);
@@ -133,7 +180,6 @@ export const useRosterStore = defineStore("roster", () => {
     activeSlot.value = slot;
   }
 
-  // What card type does the active slot expect? Drives table filtering.
   const activeSlotType = computed<"pitcher" | "hitter" | null>(() => {
     if (!activeSlot.value) return null;
     return activeSlot.value.kind === "sp" || activeSlot.value.kind === "rp"
@@ -148,8 +194,6 @@ export const useRosterStore = defineStore("roster", () => {
     if (!slot) return;
     if (slot.kind === "sp") assignPitcher(cardId, "SP", slot.order);
     else if (slot.kind === "rp") assignPitcher(cardId, "RP", slot.order);
-    else if (slot.kind === "lineup")
-      assignLineupSlot(slot.side, slot.order, cardId);
     else if (slot.kind === "depth")
       assignDepthSlot(slot.side, slot.position, slot.slot, cardId);
     else if (slot.kind === "pinchHitter")
@@ -158,10 +202,94 @@ export const useRosterStore = defineStore("roster", () => {
       assignBenchSlot(slot.side, "pinchRunner", slot.order, cardId);
   }
 
+  // ── Roster membership ──────────────────────────────────────────────────────
+
+  function addToRoster(cardId: number, type: "pitcher" | "hitter" | "twoWay") {
+    if (type === "pitcher" || type === "twoWay") {
+      if (!rosterPitcherIdSet.value.has(cardId)) {
+        const ids = [...roster.value.rosterPitcherIds];
+        const idx = ids.findIndex((id) => id === null);
+        if (idx !== -1) {
+          ids[idx] = cardId;
+          roster.value = { ...roster.value, rosterPitcherIds: ids };
+        }
+      }
+    }
+    if (type === "hitter" || type === "twoWay") {
+      if (!rosterHitterIdSet.value.has(cardId)) {
+        const ids = [...roster.value.rosterHitterIds];
+        const idx = ids.findIndex((id) => id === null);
+        if (idx !== -1) {
+          ids[idx] = cardId;
+          roster.value = { ...roster.value, rosterHitterIds: ids };
+        }
+      }
+    }
+    persist();
+  }
+
+  function removeFromRoster(cardId: number) {
+    const rosterPitcherIds = roster.value.rosterPitcherIds.map((id) =>
+      id === cardId ? null : id,
+    );
+    const rosterHitterIds = roster.value.rosterHitterIds.map((id) =>
+      id === cardId ? null : id,
+    );
+    const pitchers = roster.value.pitchers.filter((p) => p.cardId !== cardId);
+
+    function clearFromLineup(lineup: LineupConfig): LineupConfig {
+      const battingOrder = [...lineup.battingOrder];
+      const depth = {} as Record<HitterPosition, DepthSlot>;
+      for (const pos of ALL_HITTER_POSITIONS) {
+        const d = { ...lineup.depth[pos] };
+        if (d.depthStarterCardId === cardId) {
+          d.depthStarterCardId = null;
+          const idx = battingOrder.indexOf(pos);
+          if (idx !== -1) battingOrder[idx] = null;
+        }
+        if (d.utility1CardId === cardId) d.utility1CardId = null;
+        if (d.utility2CardId === cardId) d.utility2CardId = null;
+        if (d.defSubCardId === cardId) d.defSubCardId = null;
+        depth[pos] = d;
+      }
+      const pinchHitters = lineup.pinchHitters.map((id) =>
+        id === cardId ? null : id,
+      );
+      const pinchRunners = lineup.pinchRunners.map((id) =>
+        id === cardId ? null : id,
+      );
+      return { battingOrder, depth, pinchHitters, pinchRunners };
+    }
+
+    roster.value = {
+      ...roster.value,
+      rosterPitcherIds,
+      rosterHitterIds,
+      pitchers,
+      lineupVR: clearFromLineup(roster.value.lineupVR),
+      lineupVL: clearFromLineup(roster.value.lineupVL),
+    };
+    persist();
+  }
+
+  const spCount = computed(() => roster.value.spCount);
+
   // ── Settings ───────────────────────────────────────────────────────────────
 
   function setRosterType(id: string) {
     roster.value = { ...roster.value, rosterTypeId: id };
+    persist();
+  }
+
+  function setSpCount(n: number) {
+    const clamped = Math.max(4, Math.min(6, n));
+    const newRpCount = era.value.totalPitchers - clamped;
+    const pitchers = roster.value.pitchers.filter(
+      (p) =>
+        !(p.role === "SP" && p.order > clamped) &&
+        !(p.role === "RP" && p.order > newRpCount),
+    );
+    roster.value = { ...roster.value, spCount: clamped, pitchers };
     persist();
   }
 
@@ -199,8 +327,8 @@ export const useRosterStore = defineStore("roster", () => {
     dir: "up" | "down",
   ) {
     const toOrder = dir === "up" ? fromOrder - 1 : fromOrder + 1;
-    const rpCount = era.value.totalPitchers - era.value.spCount;
-    const max = role === "SP" ? era.value.spCount : rpCount;
+    const rpCount = era.value.totalPitchers - roster.value.spCount;
+    const max = role === "SP" ? roster.value.spCount : rpCount;
     if (toOrder < 1 || toOrder > max) return;
     const pitchers = roster.value.pitchers.map((p) => {
       if (p.role === role && p.order === fromOrder)
@@ -235,51 +363,6 @@ export const useRosterStore = defineStore("roster", () => {
     persist();
   }
 
-  function assignLineupSlot(side: "vr" | "vl", order: number, cardId: number) {
-    const lineup = { ...getLineup(side) };
-    lineup.slots = lineup.slots.map((s, i) =>
-      i === order - 1 ? { ...s, cardId } : s,
-    );
-    setLineup(side, lineup);
-  }
-
-  function clearLineupSlot(side: "vr" | "vl", order: number) {
-    const lineup = { ...getLineup(side) };
-    lineup.slots = lineup.slots.map((s, i) =>
-      i === order - 1 ? { cardId: null, position: null } : s,
-    );
-    setLineup(side, lineup);
-  }
-
-  function setLineupPosition(
-    side: "vr" | "vl",
-    order: number,
-    position: HitterPosition | null,
-  ) {
-    const lineup = { ...getLineup(side) };
-    lineup.slots = lineup.slots.map((s, i) =>
-      i === order - 1 ? { ...s, position } : s,
-    );
-    setLineup(side, lineup);
-  }
-
-  function moveLineupSlot(
-    side: "vr" | "vl",
-    fromOrder: number,
-    dir: "up" | "down",
-  ) {
-    const toOrder = dir === "up" ? fromOrder - 1 : fromOrder + 1;
-    if (toOrder < 1 || toOrder > 9) return;
-    const lineup = { ...getLineup(side) };
-    const slots = [...lineup.slots];
-    [slots[fromOrder - 1], slots[toOrder - 1]] = [
-      slots[toOrder - 1],
-      slots[fromOrder - 1],
-    ];
-    lineup.slots = slots;
-    setLineup(side, lineup);
-  }
-
   // ── Depth chart ────────────────────────────────────────────────────────────
 
   function assignDepthSlot(
@@ -291,10 +374,21 @@ export const useRosterStore = defineStore("roster", () => {
     const lineup = { ...getLineup(side) };
     const depth = { ...lineup.depth };
     const pos = { ...depth[position] };
-    if (slot === "depth") pos.depthStarterCardId = cardId;
-    else if (slot === "utility1") pos.utility1CardId = cardId;
-    else if (slot === "utility2") pos.utility2CardId = cardId;
-    else pos.defSubCardId = cardId;
+    if (slot === "depth") {
+      pos.depthStarterCardId = cardId;
+      const battingOrder = [...lineup.battingOrder];
+      if (!battingOrder.includes(position)) {
+        const emptyIdx = battingOrder.indexOf(null);
+        if (emptyIdx !== -1) battingOrder[emptyIdx] = position;
+      }
+      lineup.battingOrder = battingOrder;
+    } else if (slot === "utility1") {
+      pos.utility1CardId = cardId;
+    } else if (slot === "utility2") {
+      pos.utility2CardId = cardId;
+    } else {
+      pos.defSubCardId = cardId;
+    }
     depth[position] = pos;
     lineup.depth = depth;
     setLineup(side, lineup);
@@ -308,12 +402,33 @@ export const useRosterStore = defineStore("roster", () => {
     const lineup = { ...getLineup(side) };
     const depth = { ...lineup.depth };
     const pos = { ...depth[position] };
-    if (slot === "depth") pos.depthStarterCardId = null;
-    else if (slot === "utility1") pos.utility1CardId = null;
-    else if (slot === "utility2") pos.utility2CardId = null;
-    else pos.defSubCardId = null;
+    if (slot === "depth") {
+      pos.depthStarterCardId = null;
+      lineup.battingOrder = lineup.battingOrder.map((p) =>
+        p === position ? null : p,
+      );
+    } else if (slot === "utility1") {
+      pos.utility1CardId = null;
+    } else if (slot === "utility2") {
+      pos.utility2CardId = null;
+    } else {
+      pos.defSubCardId = null;
+    }
     depth[position] = pos;
     lineup.depth = depth;
+    setLineup(side, lineup);
+  }
+
+  function reorderBattingOrder(
+    side: "vr" | "vl",
+    fromIdx: number,
+    toIdx: number,
+  ) {
+    const lineup = { ...getLineup(side) };
+    const order = [...lineup.battingOrder];
+    const [item] = order.splice(fromIdx, 1);
+    order.splice(toIdx, 0, item);
+    lineup.battingOrder = order;
     setLineup(side, lineup);
   }
 
@@ -385,25 +500,27 @@ export const useRosterStore = defineStore("roster", () => {
     activeSlot,
     activeSlotType,
     era,
+    spCount,
     rosterType,
     starters,
     relievers,
-    assignedCardIds,
+    rosterPitcherIdSet,
+    rosterHitterIdSet,
     totalPlayers,
     setActiveSlot,
     assignToActiveSlot,
+    addToRoster,
+    removeFromRoster,
     setRosterType,
+    setSpCount,
     assignPitcher,
     clearPitcherSlot,
     movePitcher,
     setBullpenRole,
     getLineup,
-    assignLineupSlot,
-    clearLineupSlot,
-    setLineupPosition,
-    moveLineupSlot,
     assignDepthSlot,
     clearDepthSlot,
+    reorderBattingOrder,
     setUtilityStarts,
     assignBenchSlot,
     clearBenchSlot,

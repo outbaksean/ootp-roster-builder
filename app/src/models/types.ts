@@ -84,6 +84,12 @@ export type DefenseRatings = {
   posRatingRF: number;
 };
 
+export function pitcherRoleLabel(code: number): string {
+  if (code === 11) return "SP";
+  if (code === 13) return "CL";
+  return "RP";
+}
+
 export function getPosRating(
   defense: DefenseRatings,
   pos: FieldingPosition,
@@ -107,6 +113,7 @@ export type HitterCard = {
   cardTitle: string;
   overall: number;
   tier: CardTier;
+  isTwoWay: boolean;
   bats: BatterHand | null;
   vLScore: number;
   vRScore: number;
@@ -132,6 +139,7 @@ export type PitcherCard = {
   cardTitle: string;
   overall: number;
   tier: CardTier;
+  isTwoWay: boolean;
   throws: PitcherHand | null;
   pitcherRoleCode: number;
   stamina: number;
@@ -210,22 +218,20 @@ export type DepthSlot = {
   defSubCardId: number | null;
 };
 
-export type LineupSlot = {
-  cardId: number | null;
-  position: HitterPosition | null;
-};
-
 export type LineupConfig = {
-  slots: LineupSlot[];
+  battingOrder: (HitterPosition | null)[];
   depth: Record<HitterPosition, DepthSlot>;
   pinchHitters: (number | null)[];
   pinchRunners: (number | null)[];
 };
 
 export type Roster = {
+  rosterPitcherIds: (number | null)[];
+  rosterHitterIds: (number | null)[];
   pitchers: RosterPitcher[];
   lineupVR: LineupConfig;
   lineupVL: LineupConfig;
   rosterTypeId: string;
   eraId: string;
+  spCount: number;
 };

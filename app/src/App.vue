@@ -6,13 +6,14 @@ import { ROSTER_TYPES } from "./models/types";
 import CardUploader from "./components/CardUploader.vue";
 import PitchingView from "./components/PitchingView.vue";
 import LineupsView from "./components/LineupsView.vue";
+import RosterView from "./components/RosterView.vue";
 
-type Tab = "pitching" | "lineups";
+type Tab = "pitching" | "lineups" | "roster";
 
 const rosterStore = useRosterStore();
 const settingsStore = useSettingsStore();
 
-const activeTab = ref<Tab>("pitching");
+const activeTab = ref<Tab>("roster");
 
 const SIDEBAR_KEY = "ootp-rb-sidebar-collapsed";
 const sidebarCollapsed = ref(localStorage.getItem(SIDEBAR_KEY) === "true");
@@ -35,15 +36,31 @@ function toggleSidebar() {
       <div class="nav-tabs">
         <button
           class="nav-tab"
+          :class="{ 'nav-tab--active': activeTab === 'roster' }"
+          @click="
+            activeTab = 'roster';
+            rosterStore.setActiveSlot(null);
+          "
+        >
+          ROSTER
+        </button>
+        <button
+          class="nav-tab"
           :class="{ 'nav-tab--active': activeTab === 'pitching' }"
-          @click="activeTab = 'pitching'"
+          @click="
+            activeTab = 'pitching';
+            rosterStore.setActiveSlot(null);
+          "
         >
           PITCHING
         </button>
         <button
           class="nav-tab"
           :class="{ 'nav-tab--active': activeTab === 'lineups' }"
-          @click="activeTab = 'lineups'"
+          @click="
+            activeTab = 'lineups';
+            rosterStore.setActiveSlot(null);
+          "
         >
           LINEUPS
         </button>
@@ -115,7 +132,8 @@ function toggleSidebar() {
 
       <!-- Main panel -->
       <main class="main-panel">
-        <PitchingView v-if="activeTab === 'pitching'" />
+        <RosterView v-if="activeTab === 'roster'" />
+        <PitchingView v-else-if="activeTab === 'pitching'" />
         <LineupsView v-else />
       </main>
     </div>
